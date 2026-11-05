@@ -4,18 +4,17 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 public class JiraTools {
 
-    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private final List<Map<String, String>> tickets = new ArrayList<>();
+    private final ToolAuditLog auditLog;
 
-    public JiraTools() {
+    public JiraTools(ToolAuditLog auditLog) {
+        this.auditLog = auditLog;
         // Simulated Jira tickets reflecting a real OTA/connected-vehicle project
         tickets.add(ticket("COSMOS-1001", "BUG", "P1", "Open",
                 "OTA update timeout on ECU firmware v3.2.1",
@@ -51,17 +50,21 @@ public class JiraTools {
                 "2026-10-25 09:30"));
     }
 
-    @McpTool(description = "Search Jira tickets by status, priority, assignee, or type. Returns matching tickets from the COSMOS OTA project. Use this to check workload, find open bugs, or track sprint progress.")
+    @McpTool(description = "Search Jira tickets by status, priority, assignee, or type. Returns matching tickets from the COSMOS OTA project. Read-only. Use this to check workload, find open bugs, or track sprint progress.")
     public String searchJiraTickets(
             @McpToolParam(description = "Filter by status: Open, In Progress, Done, or 'all'") String status,
             @McpToolParam(description = "Filter by priority: P1, P2, P3, or 'all'") String priority,
             @McpToolParam(description = "Filter by assignee name, or 'all'") String assignee) {
 
+        long start = System.currentTimeMillis();
         List<Map<String, String>> results = tickets.stream()
                 .filter(t -> "all".equalsIgnoreCase(status) || t.get("status").equalsIgnoreCase(status))
                 .filter(t -> "all".equalsIgnoreCase(priority) || t.get("priority").equalsIgnoreCase(priority))
                 .filter(t -> "all".equalsIgnoreCase(assignee) || t.get("assignee").equalsIgnoreCase(assignee))
                 .collect(Collectors.toList());
+
+        auditLog.log("searchJiraTickets", Map.of("status", status, "priority", priority, "assignee", assignee),
+                System.currentTimeMillis() - start, true);
 
         if (results.isEmpty()) {
             return "No tickets found matching the filters.";
@@ -77,25 +80,7 @@ public class JiraTools {
         return sb.toString();
     }
 
-    @McpTool(description = "Create a new Jira ticket in the COSMOS project. Use this to log bugs, tasks, or stories from an incident or code review finding.")
-    public String createJiraTicket(
-            @McpToolParam(description = "Ticket type: BUG, STORY, or TASK") String type,
-            @McpToolParam(description = "Priority: P1, P2, or P3") String priority,
-            @McpToolParam(description = "Short summary of the issue") String summary,
-            @McpToolParam(description = "Detailed description") String description,
-            @McpToolParam(description = "Assignee name") String assignee) {
-
-        String key = "COSMOS-" + (1000 + tickets.size() + 1);
-        String created = LocalDateTime.now().format(FMT);
-        Map<String, String> newTicket = ticket(key, type.toUpperCase(), priority.toUpperCase(), "Open",
-                summary, assignee, description, created);
-        tickets.add(newTicket);
-
-        return String.format("Ticket created successfully!\n\n[%s] %s | %s | Status: Open\nSummary: %s\nAssignee: %s\nCreated: %s",
-                key, type.toUpperCase(), priority.toUpperCase(), summary, assignee, created);
-    }
-
-    @McpTool(description = "Get full details of a specific Jira ticket by its key (e.g., COSMOS-1001). Use this to deep-dive into a bug or check ticket context before a standup or RCA.")
+    @McpTool(description = "Get full details of a specific Jira ticket by its key (e.g., COSMOS-1001). Read-only. Use this to deep-dive into a bug or check ticket context before a standup or RCA.")
     public String getJiraTicket(
             @McpToolParam(description = "Jira ticket key, e.g. COSMOS-1001") String ticketKey) {
 

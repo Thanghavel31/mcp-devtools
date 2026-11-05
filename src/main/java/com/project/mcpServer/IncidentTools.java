@@ -4,18 +4,17 @@ import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 public class IncidentTools {
 
-    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private final List<Map<String, String>> incidents = new ArrayList<>();
+    private final ToolAuditLog auditLog;
 
-    public IncidentTools() {
+    public IncidentTools(ToolAuditLog auditLog) {
+        this.auditLog = auditLog;
         // Simulated production incidents for an OTA/IoT platform
         incidents.add(incident("INC-2001", "SEV1", "Open",
                 "OTA campaign stalled — Kafka consumer lag >100k",
@@ -53,15 +52,19 @@ public class IncidentTools {
                 "cosmos-device-connectivity"));
     }
 
-    @McpTool(description = "Get recent production incidents filtered by severity or status. Use this during standups, on-call handoffs, or to assess production health.")
+    @McpTool(description = "Get recent production incidents filtered by severity or status. Read-only. Use this during standups, on-call handoffs, or to assess production health.")
     public String getRecentIncidents(
             @McpToolParam(description = "Filter by severity: SEV1, SEV2, SEV3, or 'all'") String severity,
             @McpToolParam(description = "Filter by status: Open, Mitigated, Resolved, or 'all'") String status) {
 
+        long start = System.currentTimeMillis();
         List<Map<String, String>> results = incidents.stream()
                 .filter(i -> "all".equalsIgnoreCase(severity) || i.get("severity").equalsIgnoreCase(severity))
                 .filter(i -> "all".equalsIgnoreCase(status) || i.get("status").equalsIgnoreCase(status))
                 .collect(Collectors.toList());
+
+        auditLog.log("getRecentIncidents", Map.of("severity", severity, "status", status),
+                System.currentTimeMillis() - start, true);
 
         if (results.isEmpty()) {
             return "No incidents found matching the filters.";
@@ -77,23 +80,7 @@ public class IncidentTools {
         return sb.toString();
     }
 
-    @McpTool(description = "Create a new production incident. Use this when you detect a production issue and need to formally track it with severity, ownership, and affected service.")
-    public String createIncident(
-            @McpToolParam(description = "Severity: SEV1, SEV2, or SEV3") String severity,
-            @McpToolParam(description = "Short title describing the incident") String title,
-            @McpToolParam(description = "Detailed description including impact and initial findings") String description,
-            @McpToolParam(description = "Affected microservice name") String service,
-            @McpToolParam(description = "Incident owner/on-call engineer name") String owner) {
-
-        String id = "INC-" + (2000 + incidents.size() + 1);
-        String opened = LocalDateTime.now().format(FMT);
-        incidents.add(incident(id, severity.toUpperCase(), "Open", title, owner, opened, description, service));
-
-        return String.format("Incident created!\n\n[%s] %s | Status: Open | Service: %s\nTitle: %s\nOwner: %s\nOpened: %s\n\nNext steps:\n1. Join bridge call if SEV1\n2. Check runbook: searchConfluencePages('incident response')\n3. Post update in #cosmos-incidents",
-                id, severity.toUpperCase(), service, title, owner, opened);
-    }
-
-    @McpTool(description = "Get full details of a specific incident by ID. Use this to review incident timeline, root cause, and affected services during RCA.")
+    @McpTool(description = "Get full details of a specific incident by ID. Read-only. Use this to review incident timeline, root cause, and affected services during RCA.")
     public String getIncidentDetails(
             @McpToolParam(description = "Incident ID, e.g. INC-2001") String incidentId) {
 
